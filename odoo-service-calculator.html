@@ -25,7 +25,7 @@
 <aside id="summary" class="summary" aria-label="Estimación del proyecto"><span class="summary-eyebrow">Tu próximo paso</span><h2>Implementación Odoo</h2><p class="subtitle">Una estimación que evoluciona con tu alcance.</p><div class="summary-section"><h3 class="section-label">Resumen de horas</h3><div class="stat"><span>Aplicaciones seleccionadas</span><strong id="res-selected">14</strong></div><div class="stat"><span>Subtotal de módulos</span><strong id="res-subtotal-horas">0 h</strong></div><div class="stat"><span>Horas transversales</span><strong id="res-transversales-horas">0 h</strong></div><div class="stat total-hours"><span>Total estimado</span><strong id="res-total-horas" aria-live="polite">0 h</strong></div></div><div class="summary-section"><h3 class="section-label">Inversión estimada</h3><div class="stat"><span>Tarifa por hora</span><strong id="res-tarifa">USD 40.00</strong></div><div id="res-total-honorarios" class="price" aria-live="polite"><small>USD</small>0.00</div><p class="summary-note">Honorarios antes de impuestos. No incluye licencias de Odoo, alojamiento ni servicios de terceros.</p></div><div class="summary-actions"><button id="copy-button" class="button">Copiar propuesta para WhatsApp <span aria-hidden="true">↗</span></button><button id="download-button" class="button secondary">Descargar propuesta en texto ↓</button></div><p id="status" class="status" role="status"></p><div id="export-fallback" class="export-box" hidden><p>Selecciona y copia el texto de tu propuesta:</p><textarea id="proposal-text" class="field" aria-label="Propuesta para WhatsApp" readonly></textarea></div><div class="trust"><span class="dot"></span> Dali Group · Construyendo para el mundo</div></aside>
 </section>
 <section id="view-config" class="panel" role="tabpanel" aria-labelledby="tab-config" hidden><div class="matrix-head"><div><h2>Tu experiencia, en una matriz</h2><p class="subtitle">Edita las horas y el alcance por nivel de complejidad.</p></div><div class="matrix-actions"><button id="reset-button" class="button danger">Restablecer valores</button><button id="save-button" class="button">Guardar cambios</button></div></div><div class="matrix-filters"><input id="matrix-search" class="field" type="search" placeholder="Buscar en la matriz…" aria-label="Buscar en la matriz"><span id="matrix-status" class="matrix-message" role="status"></span></div><p class="matrix-info">Las horas son referencias editables de consultoría, no estimaciones oficiales de Odoo. Los módulos agrupados del archivo original se conservan: revisa su alcance al combinarlos con aplicaciones individuales para evitar duplicidades.</p><div class="table-scroll"><table><thead><tr><th>Módulo</th><th>Nivel</th><th>Horas</th><th>Descripción del alcance</th></tr></thead><tbody id="matrix-table-body"></tbody></table></div></section>
-<footer class="footer"><span>© Dali Group · Calculadora de implementación Odoo</span><span id="storage-note">Los cambios se guardan en este navegador.</span><span><a href="https://www.odoo.com/es/page/all-apps" target="_blank" rel="noopener noreferrer">Catálogo de aplicaciones Odoo ↗</a></span></footer>
+<footer class="footer"><span>© Dali Group · Calculadora de implementación Odoo</span><span id="storage-note">La cotización y matriz se guardan en un archivo JSON local.</span><button id="open-state-button" class="button secondary" type="button">Abrir archivo de datos</button><button id="save-state-button" class="button secondary" type="button">Guardar archivo de datos</button><input id="state-file-input" type="file" accept=".json,application/json" hidden><span><a href="https://www.odoo.com/es/page/all-apps" target="_blank" rel="noopener noreferrer">Catálogo de aplicaciones Odoo ↗</a></span></footer>
 </main>
 <script>
 'use strict';
@@ -88,18 +88,18 @@ for (const [category, moduleName, basic, intermediate, advanced, description] of
 }
 const modulesList = [...new Set(defaultMatrix.map(row=>row.modulo))];
 const originalModules = [...new Set(originalMatrix.map(row=>row.modulo))];
-const storageKey = 'dali_odoo_calculator_v1';
-let storageAvailable = true;
-function readStorage(key) {try{return JSON.parse(localStorage.getItem(key));}catch{return null;}}
+let stored = null;
+let stateFileHandle = null;
+let stateSaveTimer = null;
+function readStorage() {return null;}
 function finiteNumber(value, maximum=1000000) {const parsed=Number(value);return Number.isFinite(parsed)?Math.min(maximum,Math.max(0,parsed)):0;}
-const stored = readStorage(storageKey);
-const savedMatrix = Array.isArray(stored?.matrix)?stored.matrix:readStorage('odoo_matrix');
+const savedMatrix = null;
 let matrixData = defaultMatrix.map(row=>{
  const saved=Array.isArray(savedMatrix)?savedMatrix.find(item=>item?.modulo===row.modulo&&item?.nivel===row.nivel):null;
  return {...row,horas:row.nivel==='No requiere'?0:saved&&Number.isFinite(Number(saved.horas))?finiteNumber(saved.horas):row.horas,desc:typeof saved?.desc==='string'?saved.desc:row.desc};
 });
 let selectedLevels = {};
-const savedLevels = stored?.levels || readStorage('odoo_selected_levels') || {};
+const savedLevels = {};
 for(const moduleName of modulesList){
  const rows=matrixData.filter(row=>row.modulo===moduleName);
  selectedLevels[moduleName]=rows.some(row=>row.nivel===savedLevels[moduleName])?savedLevels[moduleName]:originalModules.includes(moduleName)?rows.find(row=>row.nivel!=='No requiere').nivel:'No requiere';
@@ -111,14 +111,28 @@ const hoursText = value=>numberFormat.format(value)+' h';
 const moneyText = value=>'USD '+moneyFormat.format(value);
 const escapeHtml = value=>String(value).replace(/[&<>"']/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
 const normalize = value=>value.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-if(stored?.params){byId('input-transversal').value=finiteNumber(stored.params.transversal,100);byId('input-rate').value=finiteNumber(stored.params.rate);}
+
 let committedMatrix = structuredClone(matrixData);
-function persist(){
- try{localStorage.setItem(storageKey,JSON.stringify({matrix:committedMatrix,levels:selectedLevels,params:{transversal:finiteNumber(byId('input-transversal').value,100),rate:finiteNumber(byId('input-rate').value)}}));storageAvailable=true;}
- catch{storageAvailable=false;}
- byId('storage-note').textContent=storageAvailable?'Los cambios se guardan en este navegador.':'Guardado local no disponible. Conserva la propuesta descargándola en texto.';
- return storageAvailable;
+function getPersistentState(){return {version:1,updatedAt:new Date().toISOString(),matrix:committedMatrix,levels:selectedLevels,params:{transversal:finiteNumber(byId('input-transversal').value,100),rate:finiteNumber(byId('input-rate').value)}};}
+function downloadStateFile(){
+ const blob=new Blob([JSON.stringify(getPersistentState(),null,2)],{type:'application/json'});
+ const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='odoo-service-calculator-data.json';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
+async function persist(){
+ byId('storage-note').textContent=stateFileHandle?'Guardando cotización y matriz en tu archivo local…':'Sin archivo vinculado; descarga un JSON para conservar tus datos.';
+ clearTimeout(stateSaveTimer);
+ if(stateFileHandle){stateSaveTimer=setTimeout(async()=>{try{const writable=await stateFileHandle.createWritable();await writable.write(JSON.stringify(getPersistentState(),null,2));await writable.close();byId('storage-note').textContent='Cotización y matriz guardadas en '+stateFileHandle.name+'.';}catch{stateFileHandle=null;byId('storage-note').textContent='No se pudo actualizar el archivo. Descarga una copia JSON.';}},250);}
+ return true;
+}
+function applyPersistentState(data){
+ if(!data||typeof data!=='object')throw new Error('El archivo no contiene datos válidos.');
+ if(Array.isArray(data.matrix))matrixData=defaultMatrix.map(row=>{const saved=data.matrix.find(item=>item?.modulo===row.modulo&&item?.nivel===row.nivel);return {...row,horas:row.nivel==='No requiere'?0:saved&&Number.isFinite(Number(saved.horas))?finiteNumber(saved.horas):row.horas,desc:typeof saved?.desc==='string'?saved.desc:row.desc};});
+ committedMatrix=structuredClone(matrixData);
+ if(data.levels&&typeof data.levels==='object')for(const name of modulesList){if(matrixData.some(row=>row.modulo===name&&row.nivel===data.levels[name]))selectedLevels[name]=data.levels[name];}
+ if(data.params){byId('input-transversal').value=finiteNumber(data.params.transversal,100);byId('input-rate').value=finiteNumber(data.params.rate);}
+ renderModulesForm();if(!byId('view-config').hidden)renderConfigMatrix();persist();
+}
+
 function getEstimate(){
  const items=modulesList.map(moduleName=>matrixData.find(row=>row.modulo===moduleName&&row.nivel===selectedLevels[moduleName])).filter(row=>row&&row.nivel!=='No requiere');
  const subtotal=items.reduce((sum,row)=>sum+finiteNumber(row.horas),0);
@@ -209,11 +223,13 @@ byId('matrix-table-body').addEventListener('input',event=>{
 });
 byId('matrix-table-body').addEventListener('change',event=>{if(event.target.dataset.field==='horas')event.target.value=matrixData[event.target.dataset.index].horas;});
 byId('save-button').addEventListener('click',saveMatrix);
+byId('save-state-button').addEventListener('click',async()=>{if(window.showSaveFilePicker){try{stateFileHandle=await window.showSaveFilePicker({suggestedName:'odoo-service-calculator-data.json',types:[{description:'Datos de calculadora (JSON)',accept:{'application/json':['.json']}}]});await persist();}catch(error){if(error.name!=='AbortError')downloadStateFile();}}else downloadStateFile();});
+byId('open-state-button').addEventListener('click',async()=>{if(window.showOpenFilePicker){try{const [handle]=await window.showOpenFilePicker({types:[{description:'Datos de calculadora (JSON)',accept:{'application/json':['.json']}}],multiple:false});stateFileHandle=handle;applyPersistentState(JSON.parse(await (await handle.getFile()).text()));}catch(error){if(error.name!=='AbortError')byId('storage-note').textContent='No se pudo abrir ese archivo JSON.';}}else byId('state-file-input').click();});
+byId('state-file-input').addEventListener('change',async event=>{const file=event.target.files[0];if(!file)return;try{applyPersistentState(JSON.parse(await file.text()));byId('storage-note').textContent='Datos cargados. Usa Guardar archivo de datos para descargar el JSON actualizado.';}catch{byId('storage-note').textContent='El archivo JSON no es válido.';}event.target.value='';});
 byId('reset-button').addEventListener('click',resetMatrix);
 byId('copy-button').addEventListener('click',copyToClipboard);
 byId('download-button').addEventListener('click',downloadProposal);
 renderModulesForm();
-persist();
 </script>
 </body>
 </html>
